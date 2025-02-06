@@ -43,7 +43,7 @@ public class FederationTestNetConstants extends FederationConstants {
         federationActivationAge = 360L;
 
         fundsMigrationAgeSinceActivationBegin = 0L;
-        fundsMigrationAgeSinceActivationEnd = 900L;
+        fundsMigrationAgeSinceActivationEnd = 150L;
         specialCaseFundsMigrationAgeSinceActivationEnd = 900L;
 
         erpFedPubKeysList = Stream.of(

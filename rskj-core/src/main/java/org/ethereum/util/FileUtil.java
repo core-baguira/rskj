@@ -23,8 +23,14 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.File;
+import java.io.IOException;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
 
 import static java.lang.System.getProperty;
 
@@ -65,4 +71,30 @@ public class FileUtil {
         }
     }
 
+    public static void moveSourcePathContentToTargetPath (Path sourcePath, Path targetPath) {
+        try {
+            Files.walkFileTree(sourcePath, new SimpleFileVisitor<>() {
+                @Override
+                public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                    Path targetFile = targetPath.resolve(sourcePath.relativize(file));
+                    Files.createDirectories(targetFile.getParent()); // Ensure parent folders exist
+                    Files.move(file, targetFile, StandardCopyOption.REPLACE_EXISTING);
+                    return FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public FileVisitResult postVisitDirectory(Path dir, IOException exc) throws IOException {
+                    if (!dir.equals(sourcePath)) {
+                        Files.delete(dir); // Delete empty directories after move
+                    }
+                    return FileVisitResult.CONTINUE;
+                }
+            });
+
+            Files.delete(sourcePath); // Delete empty directories after move
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+
+    }
 }

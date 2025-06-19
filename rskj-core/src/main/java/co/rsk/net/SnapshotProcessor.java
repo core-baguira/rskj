@@ -42,6 +42,7 @@ import org.ethereum.core.BlockHeader;
 import org.ethereum.core.Blockchain;
 import org.ethereum.core.TransactionPool;
 import org.ethereum.db.BlockStore;
+import org.ethereum.util.FileUtil;
 import org.ethereum.util.RLP;
 import org.ethereum.util.RLPElement;
 import org.ethereum.util.RLPList;
@@ -50,6 +51,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 import java.math.BigInteger;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -676,7 +678,7 @@ public class SnapshotProcessor implements InternalService {
         }
 
         if (TrieDTOInOrderRecoverer.verifyChunk(state.getRemoteRootHash(), preRootNodes, nodes, postRootNodes)) {
-            state.getAllNodes().addAll(nodes);
+            nodes.forEach(tmpTrieStore::saveDTO);
             state.setStateSize(state.getStateSize().add(BigInteger.valueOf(trieElements.size())));
             state.setStateChunkSize(state.getStateChunkSize().add(BigInteger.valueOf(message.getChunkOfTrieKeyValue().length)));
             if (message.isComplete()) {
@@ -697,16 +699,72 @@ public class SnapshotProcessor implements InternalService {
         return lastVerifiedBlockHeader != null && blockStore.isBlockExist(lastVerifiedBlockHeader.getParentHash().getBytes());
     }
 
+    private void moveTmpTrieContentToTrie () {
+        logger.info("Migrating temporary trie database to project's trie database...");
+
+        final var sourceDir = Paths.get(databaseDir).resolve(TMP_TRIE_DIR_NAME);
+        final var targetDir = Paths.get(databaseDir);
+
+        FileUtil.moveSourcePathContentToTargetPath(sourceDir, targetDir);
+
+        logger.info("Finished migrating temporary trie database to project's trie database...");
+    }
+
+    private boolean validateTrie(TrieDTO node) {
+        if (Optional.ofNullable(node.getLeftHash()).isPresent()) {
+            var leftNode = node.getLeftNode();
+
+            if (Optional.ofNullable(leftNode).isEmpty()) {
+                final var leftNodeOptional = tmpTrieStore.retrieveDTO(node.getLeftHash());
+
+                if (leftNodeOptional.isEmpty()) {
+                    return false;
+                }
+
+                leftNode = leftNodeOptional.get();
+            }
+
+            if (!Arrays.equals(node.getLeftHash(), leftNode.calculateHash())) {
+                return false;
+            }
+
+            return validateTrie(leftNode);
+        }
+
+        if (Optional.ofNullable(node.getRightHash()).isPresent()) {
+            var rightNode = node.getRightNode();
+
+            if (Optional.ofNullable(rightNode).isEmpty()) {
+                final var rightNodeOptional = tmpTrieStore.retrieveDTO(node.getRightHash());
+
+                if (rightNodeOptional.isEmpty()) {
+                    return false;
+                }
+
+                rightNode = rightNodeOptional.get();
+            }
+
+            if (!Arrays.equals(node.getRightHash(), rightNode.calculateHash())) {
+                return false;
+            }
+
+            return validateTrie(rightNode);
+        }
+
+        return true;
+    }
+
     /**
      * Once state share is received, rebuild the trie, save it in db and save all the blocks.
      */
     private boolean rebuildStateAndSave(SnapSyncState state) {
         logger.info("Recovering trie...");
-        final TrieDTO[] nodeArray = state.getAllNodes().toArray(new TrieDTO[0]);
-        Optional<TrieDTO> result = TrieDTOInOrderRecoverer.recoverTrie(nodeArray, this.trieStore::saveDTO);
+        final var result = tmpTrieStore.retrieveDTO(state.getRemoteRootHash());
 
-        if (result.isPresent() && Arrays.equals(state.getRemoteRootHash(), result.get().calculateHash())) {
+        if (result.isPresent() && validateTrie(result.get())) {
             logger.info("State final validation OK!");
+
+            moveTmpTrieContentToTrie();
 
             this.blockchain.removeBlocksByNumber(0);
             //genesis is removed so backwards sync will always start.

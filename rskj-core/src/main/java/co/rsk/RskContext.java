@@ -2096,18 +2096,33 @@ public class RskContext implements NodeContext, NodeBootstrapper {
                     getRskSystemProperties().getSnapshotMaxSenderRequests(),
                     getRskSystemProperties().checkHistoricalHeaders(),
                     getRskSystemProperties().isSnapshotParallelEnabled(),
-                    getTtmpSnapSyncTrieStore(),
+                    getTmpSnapSyncTrieStore(),
                     getRskSystemProperties().databaseDir()
             );
         }
         return snapshotProcessor;
     }
 
-    private synchronized TrieStore getTtmpSnapSyncTrieStore() {
+    private synchronized TrieStore getTmpSnapSyncTrieStore() {
+        if (!getRskSystemProperties().isClientSnapshotSyncEnabled()) {
+            return null;
+        }
+
         checkIfNotClosed();
 
         if (tmpSnapSyncTrieStore == null) {
-            tmpSnapSyncTrieStore = buildAbstractTrieStore(Paths.get(getRskSystemProperties().databaseDir()).resolve(SnapshotProcessor.TMP_TRIE_DIR_NAME));
+            final var databasePath = Paths.get(getRskSystemProperties().databaseDir());
+            final var tmpDatabasePath = databasePath.resolve(SnapshotProcessor.TMP_TRIE_DIR_NAME);
+
+            if(!Files.exists(tmpDatabasePath)) {
+                try {
+                    Files.createDirectory(tmpDatabasePath);
+                } catch (IOException e) {
+                    logger.error("Unable to create temporary folder snapshot sync trie store", e);
+                }
+            }
+
+            tmpSnapSyncTrieStore = buildAbstractTrieStore(tmpDatabasePath);
         }
 
         return tmpSnapSyncTrieStore;
